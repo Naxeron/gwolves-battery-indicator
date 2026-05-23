@@ -319,7 +319,7 @@ class GWolvesBatteryApp(QApplication):
             self.tray.setIcon(self.create_percentage_icon(percentage, is_charging, True))
             self.tray.setToolTip(f"{model_name}: {percentage}% ({status_text})")
             
-            if not is_charging and percentage <= 15:
+            if not is_charging and 0 < percentage <= 15:
                 if not self.low_battery_notified:
                     self.tray.showMessage(
                         "Low Battery",
