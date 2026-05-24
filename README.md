@@ -1,4 +1,4 @@
-# G-Wolves Battery Indicator
+# G-Wolves Battery Indicator (HEAVY WIP!!!)
 
 A lightweight system tray application for Linux that displays the real-time battery status and charging state of G-Wolves wireless gaming mice (configured for the G-Wolves Fenrir Pro 8K USB Receiver).
 
