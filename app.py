@@ -5,6 +5,8 @@ import hid
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt6.QtCore import QTimer, QThread, pyqtSignal, Qt
+from PyQt6.QtDBus import QDBusConnection
+
 
 # G-Wolves USB Vendor ID (Universal for all G-Wolves devices)
 VID = 0x33e4
@@ -429,6 +431,18 @@ class GWolvesBatteryApp(QApplication):
         self.reader_thread = BatteryReaderThread()
         self.reader_thread.status_updated.connect(self.handle_status_update)
         self.reader_thread.start()
+        
+        # Register DBus Scroll method listeners for Wayland StatusNotifierItem compatibility
+        try:
+            QDBusConnection.sessionBus().connect(
+                "", "/StatusNotifierItem", "org.kde.StatusNotifierItem", "Scroll", self.handle_dbus_scroll
+            )
+            QDBusConnection.sessionBus().connect(
+                "", "/StatusNotifierItem", "org.freedesktop.StatusNotifierItem", "Scroll", self.handle_dbus_scroll
+            )
+            print("DBus StatusNotifierItem Scroll listeners registered successfully.")
+        except Exception as e:
+            print(f"Failed to register DBus Scroll listeners: {e}")
 
     def create_percentage_icon(self, percentage, is_charging, is_connected):
         pixmap = QPixmap(32, 32)
@@ -512,6 +526,18 @@ class GWolvesBatteryApp(QApplication):
             if idx > 0:
                 new_rate = self.supported_rates[idx - 1]
                 self.set_mouse_polling_rate(new_rate)
+
+    def handle_dbus_scroll(self, delta, orientation="vertical"):
+        # Handle scroll event forwarded by the DBus StatusNotifierItem host (e.g. KDE panel)
+        try:
+            d = int(delta)
+            if orientation == "vertical":
+                if d > 0:
+                    self.handle_tray_scroll(1)
+                elif d < 0:
+                    self.handle_tray_scroll(-1)
+        except Exception as e:
+            print(f"Error handling DBus scroll: {e}")
 
     def handle_status_update(self, percentage, is_charging, is_connected, error_message, model_name, polling_rate, supported_rates):
         if is_connected:
