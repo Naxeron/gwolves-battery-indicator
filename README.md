@@ -15,7 +15,7 @@ A lightweight, universal system tray application for Linux that displays the rea
   - 🔵 **Light Blue**: Good battery status (>= 50%).
   - ⚪ **Grey**: Disconnected / Error state.
 - **Low Battery Notifications**: Sends a desktop notification warning when the battery drops to 15% or below.
-- **Polling Rate Control**: Set your mouse's polling rate (from 125Hz up to 8000Hz depending on your receiver capabilities) easily by clicking or scrolling on the tray menu!
+- **Polling Rate Control**: Set your mouse's polling rate (from 125Hz up to 8000Hz depending on your receiver capabilities) easily by clicking on the tray menu!
 - **Asynchronous Polling**: Checks battery state and connection on a background thread to keep the desktop environment responsive.
 
 ---

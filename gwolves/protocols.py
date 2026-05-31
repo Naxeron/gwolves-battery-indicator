@@ -104,10 +104,10 @@ def query_polling_rate(dev, protocol, is_wireless, is_high_rate=False):
             payload = resp[1:]
             # Unshifted
             if payload[0] == 161 and payload[3] == 2 and payload[5] == 128:
-                byte_val = payload[6] if is_high_rate else payload[7]
+                byte_val = payload[7]
             # Shifted
             elif payload[1] == 161 and payload[4] == 2 and payload[6] == 128:
-                byte_val = payload[7] if is_high_rate else payload[8]
+                byte_val = payload[8]
             else:
                 return None
             
@@ -154,21 +154,13 @@ def set_polling_rate(dev, protocol, is_wireless, freq, is_high_rate=False):
             if not byte_val:
                 return False
             buf = [0] * 65
-            if is_high_rate:
-                # 4K/8K mice use old protocol format to set the rate
-                buf[0] = 0
-                buf[2] = 2
-                buf[3] = 2
-                buf[4] = 0
-                buf[5] = byte_val
-            else:
-                buf[0] = 0
-                buf[3] = 2
-                buf[4] = 2
-                buf[5] = 1
-                buf[6] = 0
-                buf[7] = 1 if is_wireless else 2
-                buf[8] = byte_val
+            buf[0] = 0
+            buf[3] = 2
+            buf[4] = 2
+            buf[5] = 1
+            buf[6] = 0
+            buf[7] = 1 if is_wireless else 2
+            buf[8] = byte_val
             
             dev.send_feature_report(buf)
             time.sleep(0.05)
