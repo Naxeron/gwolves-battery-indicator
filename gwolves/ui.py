@@ -1,7 +1,7 @@
 import sys
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, pyqtSlot
 from PyQt6.QtDBus import QDBusConnection
 
 from gwolves.device import BatteryReaderThread
@@ -165,6 +165,7 @@ class GWolvesBatteryApp(QApplication):
                 new_rate = self.supported_rates[idx - 1]
                 self.set_mouse_polling_rate(new_rate)
 
+    @pyqtSlot(int, str)
     def handle_dbus_scroll(self, delta, orientation="vertical"):
         # Handle scroll event forwarded by the DBus StatusNotifierItem host (e.g. KDE panel)
         try:

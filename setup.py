@@ -38,12 +38,8 @@ def check_dependencies():
         
     return all_ok
 
-def setup_autostart(app_path):
-    print_info("Configuring autostart entry...")
-    autostart_dir = os.path.expanduser("~/.config/autostart")
-    os.makedirs(autostart_dir, exist_ok=True)
-    
-    desktop_file_path = os.path.join(autostart_dir, "gwolves-battery.desktop")
+def setup_desktop_entries(app_path, project_dir):
+    print_info("Configuring desktop entries...")
     
     desktop_content = f"""[Desktop Entry]
 Name=G-Wolves Battery Indicator
@@ -56,13 +52,21 @@ Categories=Utility;
 StartupNotify=false
 """
     
-    try:
-        with open(desktop_file_path, "w") as f:
-            f.write(desktop_content)
-        os.chmod(desktop_file_path, 0o755)
-        print_success(f"Autostart entry created at: {desktop_file_path}")
-    except Exception as e:
-        print_error(f"Failed to create autostart entry: {e}")
+    locations = [
+        os.path.expanduser("~/.config/autostart/gwolves-battery.desktop"),
+        os.path.expanduser("~/.local/share/applications/gwolves-battery.desktop"),
+        os.path.join(project_dir, "gwolves-battery.desktop")
+    ]
+    
+    for desktop_file_path in locations:
+        try:
+            os.makedirs(os.path.dirname(desktop_file_path), exist_ok=True)
+            with open(desktop_file_path, "w") as f:
+                f.write(desktop_content)
+            os.chmod(desktop_file_path, 0o755)
+            print_success(f"Desktop entry created at: {desktop_file_path}")
+        except Exception as e:
+            print_error(f"Failed to create desktop entry at {desktop_file_path}: {e}")
 
 def check_udev_rules(rules_src_path):
     print_info("Checking udev rules...")
@@ -82,15 +86,15 @@ def main():
     print("=" * 60)
     
     project_dir = os.path.dirname(os.path.abspath(__file__))
-    app_path = os.path.join(project_dir, "app.py")
+    app_path = os.path.join(project_dir, "gwolves_indicator.py")
     rules_src_path = os.path.join(project_dir, "99-gwolves-universal.rules")
     
     if not os.path.exists(app_path):
-        print_error(f"Could not find app.py at {app_path}")
+        print_error(f"Could not find gwolves_indicator.py at {app_path}")
         sys.exit(1)
         
     deps_ok = check_dependencies()
-    setup_autostart(app_path)
+    setup_desktop_entries(app_path, project_dir)
     check_udev_rules(rules_src_path)
     
     print("-" * 60)
