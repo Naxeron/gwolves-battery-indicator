@@ -28,72 +28,28 @@ For a deep-dive into how to add new devices, debug udev issues, or understand th
 
 ## Installation & Setup
 
-### 1. Install System Dependencies
-This application requires `hidapi` to communicate with the USB device, and `PyQt6` for the system tray GUI.
+Run the included setup script to automatically configure desktop shortcuts, generate autostart entries, and check for missing dependencies:
 
-#### Install `hidapi` on your Linux distribution:
-- **Ubuntu/Debian**:
-  ```bash
-  sudo apt update
-  sudo apt install libhidapi-hidraw0
-  ```
-- **Fedora/RHEL**:
-  ```bash
-  sudo dnf install hidapi
-  ```
-- **Arch Linux**:
-  ```bash
-  sudo pacman -S hidapi
-  ```
-
-### 2. Install Python Packages
-Install the required Python wrappers:
 ```bash
-pip install PyQt6 python-hidapi
+python3 setup.py
 ```
 
-### 3. Setup USB Device Permissions (`udev` rule)
-By default, Linux blocks non-root applications from reading raw HID devices (`/dev/hidraw*`). To run the indicator as a normal user without `sudo`, you must configure a universal `udev` rule for the G-Wolves Vendor ID:
+The script will guide you through setting up the necessary `udev` rules so that the indicator can read your mouse battery without requiring root privileges.
 
-1. Create a rules file for the G-Wolves receiver:
-   ```bash
-   sudo nano /etc/udev/rules.d/99-gwolves-universal.rules
-   ```
-2. Paste the following rule (Vendor ID `33e4`):
-   ```udev
-   KERNEL=="hidraw*", ATTRS{idVendor}=="33e4", MODE="0666"
-   ```
-3. Save and close the file (`Ctrl+O`, `Enter`, then `Ctrl+X` in nano).
-4. Reload the `udev` daemon to apply the change:
-   ```bash
-   sudo udevadm control --reload-rules
-   sudo udevadm trigger
-   ```
-5. **Unplug and replug** your G-Wolves USB receiver.
+### Missing Dependencies?
+If the setup script detects missing dependencies, you can install them via pip or your system package manager:
+```bash
+pip install PyQt6 hidapi
+```
 
 ---
 
 ## Usage
 
-### Run from Terminal
-Launch the application using Python:
+After running the setup script, you can launch the application directly from your system app launcher (search for **G-Wolves Battery Indicator**), or start it from the terminal:
+
 ```bash
 python3 gwolves_indicator.py
 ```
 
-### Autostart on System Login
-To make the application start automatically when you log in:
-
-1. Copy the desktop entry file to your user's autostart directory:
-   ```bash
-   mkdir -p ~/.config/autostart
-   cp gwolves-battery.desktop ~/.config/autostart/
-   ```
-2. Open the desktop file in a text editor:
-   ```bash
-   nano ~/.config/autostart/gwolves-battery.desktop
-   ```
-3. Update the `Exec` line to point to the correct absolute path of the new script:
-   ```desktop
-   Exec=python3 /home/naxeron/Projects/gwolves-battery-indicator/gwolves_indicator.py
-   ```
+The application will now automatically run silently in your system tray every time you log in!
