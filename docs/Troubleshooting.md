@@ -29,3 +29,12 @@ If you are running a Wayland session (GNOME, KDE Plasma) and the system tray doe
 ```bash
 QT_QPA_PLATFORM=xcb python3 gwolves_indicator.py
 ```
+
+### Using the Official Web App (mouse.xyz)
+When using the official G-Wolves web driver at `mouse.xyz`, keep the following officially recommended tips in mind:
+- **Browser Compatibility**: The web driver requires the WebHID API, so you **must** use a Chromium-based browser like Google Chrome or Microsoft Edge.
+- **Desktop Software**: To use the web driver, you must turn off any desktop driver software first.
+- **Dongle Conflicts**: Only one 1K dongle can be connected at a time while configuring.
+- **Battery Display Issues**: If the battery does not display, first click "Disconnect," then click "Connect."
+- **Offline Device**: If the device shows as offline, wake up the mouse or make sure the switch on the bottom is set to 2.4G.
+- **Firmware Updates**: During DFU updates, ensure only one receiver is connected.
