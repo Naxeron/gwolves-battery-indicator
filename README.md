@@ -1,8 +1,9 @@
 # G-Wolves Battery Indicator
 
+![KovaaKs Scenario Tracker Screenshot](screenshot.png)
+
 A lightweight, universal system tray application for Linux that displays the real-time battery status, charging state, and polling rate of G-Wolves wireless gaming mice. 
 
-![Battery Status](https://img.shields.io/badge/G--Wolves-Battery--Indicator-blue)
 ![Platform Linux](https://img.shields.io/badge/platform-linux-lightgrey)
 
 ## Features
