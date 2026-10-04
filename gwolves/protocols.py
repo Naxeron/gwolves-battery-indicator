@@ -1,4 +1,10 @@
+"""HID report encoding and validated response decoding for G-Wolves mice."""
+
+import logging
 import time
+
+
+logger = logging.getLogger(__name__)
 
 # G-Wolves USB Vendor ID (Universal for all G-Wolves devices)
 VID = 0x33e4
@@ -83,171 +89,146 @@ BYTE_TO_FREQ_NEW = {v: k for k, v in FREQ_TO_BYTE_NEW.items()}
 BYTE_TO_FREQ_NEW[16] = 1000
 
 
-def query_polling_rate(dev, protocol, is_wireless, is_high_rate=False):
-    """Queries the current polling rate of the G-Wolves device."""
-    try:
+def _send_report(dev, report):
+    """Require HIDAPI to accept the complete report, including its report ID."""
+    written = dev.send_feature_report(report)
+    if written != len(report):
+        raise OSError(f"Incomplete feature report write ({written} of {len(report)} bytes)")
+
+
+def _matching_payload(response, protocol, command, minimum_length, category=2):
+    """Normalize the two documented reply offsets only after header validation."""
+    if not response or response[0] != 0:
+        return None
+    for offset in (1, 2):
+        payload = response[offset:]
+        if len(payload) < minimum_length or payload[0] != 0xA1:
+            continue
         if protocol == "new":
-            buf = [0] * 65
-            buf[0] = 0
-            buf[3] = 2
-            buf[4] = 2
-            buf[5] = 1
-            buf[6] = 0x80
-            buf[7] = 1 if is_wireless else 2
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.05)
-            resp = dev.get_feature_report(0, 65)
-            if not resp or len(resp) < 10:
-                return None
-            
-            payload = resp[1:]
-            # Unshifted
-            if payload[0] == 161 and payload[3] == 2 and payload[5] == 128:
-                byte_val = payload[7]
-            # Shifted
-            elif payload[1] == 161 and payload[4] == 2 and payload[6] == 128:
-                byte_val = payload[8]
-            else:
-                return None
-            
-            if byte_val == 16:
-                byte_val = 1
-            return BYTE_TO_FREQ_NEW.get(byte_val, 1000)
-            
-        elif protocol == "old":
-            buf = [0] * 65
-            buf[0] = 0
-            buf[2] = 2
-            buf[3] = 0x82
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.05)
-            resp = dev.get_feature_report(0, 65)
-            if not resp or len(resp) < 8:
-                return None
-                
-            payload = resp[1:]
-            # Unshifted
-            if payload[0] == 161 and payload[1] == 2 and payload[2] == 0x82:
-                byte_val = payload[4]
-            # Shifted
-            elif payload[1] == 161 and payload[2] == 2 and payload[3] == 0x82:
-                byte_val = payload[5]
-            else:
-                return None
-                
-            if byte_val == 16:
-                byte_val = 1
-            return BYTE_TO_FREQ_NEW.get(byte_val, 1000)
-            
-    except Exception as e:
-        print(f"Error querying polling rate: {e}")
+            matches = payload[3] == category and payload[5] == command
+        else:
+            matches = payload[1] == category and payload[2] == command
+        if matches:
+            return payload
     return None
 
 
-def set_polling_rate(dev, protocol, is_wireless, freq, is_high_rate=False):
-    """Sets the G-Wolves device polling rate."""
+def _query_active_profile(dev):
+    """Read the profile selector required by new-protocol performance commands."""
+    buf = [0] * 65
+    buf[3:7] = [2, 1, 0, 0x85]
+    _send_report(dev, buf)
+    time.sleep(0.05)
+    response = dev.get_feature_report(0, 65)
+    payload = _matching_payload(response, "new", 0x85, 7, category=1)
+    if payload is None:
+        return None
+    profile = payload[6]
+    # The reference uses one-based profile IDs but supplies no per-model maximum.
+    return profile if isinstance(profile, int) and 1 <= profile <= 255 else None
+
+
+def query_polling_rate(dev, protocol, is_wireless, is_high_rate=False):
+    """Return the reported rate in Hz, or None for an unrecognized/failed reply."""
+    buf = [0] * 65
     try:
         if protocol == "new":
-            byte_val = FREQ_TO_BYTE_NEW.get(freq)
-            if not byte_val:
-                return False
-            buf = [0] * 65
-            buf[0] = 0
-            buf[3] = 2
-            buf[4] = 2
-            buf[5] = 1
-            buf[6] = 0
-            buf[7] = 1 if is_wireless else 2
-            buf[8] = byte_val
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.05)
-            return True
-            
+            profile = _query_active_profile(dev)
+            if profile is None:
+                return None
+            buf[3:8] = [2, 2, 1, 0x80, profile]
+            command, minimum_length, value_index = 0x80, 8, 7
         elif protocol == "old":
-            byte_val = FREQ_TO_BYTE_NEW.get(freq)
-            if not byte_val:
+            buf[2:5] = [2, 0x82, 1 if is_wireless else 0]
+            command, minimum_length, value_index = 0x82, 5, 4
+        else:
+            return None
+        _send_report(dev, buf)
+        time.sleep(0.05)
+        response = dev.get_feature_report(0, 65)
+    except OSError as exc:
+        logger.debug("Polling rate query failed (%s): %s", protocol, exc)
+        return None
+
+    payload = _matching_payload(response, protocol, command, minimum_length)
+    if payload is None:
+        return None
+    if protocol == "new" and (payload[4] != 1 or payload[6] != profile):
+        return None
+    return BYTE_TO_FREQ_NEW.get(payload[value_index])
+
+
+def set_polling_rate(dev, protocol, is_wireless, freq, is_high_rate=False):
+    """Send a rate change; True means a complete write, not device confirmation.
+
+    New-protocol changes target the device's active profile. If that cannot be
+    read, no setting is written. Query the rate afterward to verify application.
+    """
+    byte_val = FREQ_TO_BYTE_NEW.get(freq)
+    if byte_val is None:
+        return False
+    buf = [0] * 65
+    try:
+        if protocol == "new":
+            profile = _query_active_profile(dev)
+            if profile is None:
+                logger.warning("Polling rate change skipped: active profile is unavailable")
                 return False
-            buf = [0] * 65
-            buf[0] = 0
-            buf[2] = 2
-            buf[3] = 2
-            buf[4] = 0
-            buf[5] = byte_val
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.05)
-            return True
-            
-    except Exception as e:
-        print(f"Error setting polling rate: {e}")
-    return False
+            buf[3:9] = [2, 2, 1, 0, profile, byte_val]
+        elif protocol == "old":
+            buf[2:6] = [2, 2, 1 if is_wireless else 0, byte_val]
+        else:
+            return False
+        _send_report(dev, buf)
+        time.sleep(0.05)
+    except OSError as exc:
+        logger.warning("Polling rate change failed (%s): %s", protocol, exc)
+        return False
+    return True
 
 
 def query_battery(dev, protocol, is_wireless):
-    """Sends battery status request and parses responses based on protocol type."""
+    """Return (success, percentage, charging, error) from a validated reply."""
+    if protocol == "new":
+        buf = [0] * 65
+        buf[3:7] = [2, 2, 0, 0x83]
+        command, minimum_length, percentage_index, charging_index = 0x83, 8, 7, 6
+    elif protocol == "old":
+        buf = [0] * 65
+        buf[2:5] = [2, 0x8F, 1 if is_wireless else 0]
+        command, minimum_length, percentage_index, charging_index = 0x8F, 6, 5, 4
+    elif protocol == "compx":
+        # Retained for explicitly selected legacy devices; transport is experimental.
+        buf = [0] * 17
+        buf[1] = 4
+        percentage_index, charging_index = 5, 6
+    else:
+        return False, 0, False, "Unsupported protocol"
+
     try:
-        if protocol == "new":
-            buf = [0] * 65
-            buf[0] = 0
-            buf[3] = 2     # wiredMouseDeviceID (typically 2)
-            buf[4] = 2     # Command Category
-            buf[6] = 0x83  # Command ID: Get Battery
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.1)
-            resp = dev.get_feature_report(0, 65)
-            if not resp or len(resp) < 10:
-                return False, 0, False, "No response"
-            
-            payload = resp[1:]
-            # Case A: Shifted Response
-            if payload[1] == 161 and payload[4] == 2 and payload[6] == 131:
-                return True, payload[8], (payload[7] == 1), ""
-            # Case B: Unshifted Response
-            elif payload[0] == 161 and payload[3] == 2 and payload[5] == 131:
-                return True, payload[7], (payload[6] == 1), ""
-            
-        elif protocol == "old":
-            buf = [0] * 65
-            buf[0] = 0
-            buf[2] = 2     # Command Category
-            buf[3] = 0x8F  # Command ID: Get Battery
-            buf[4] = 1 if is_wireless else 0
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.1)
-            resp = dev.get_feature_report(0, 65)
-            if not resp or len(resp) < 10:
-                return False, 0, False, "No response"
-            
-            payload = resp[1:]
-            # Case A: Shifted Response
-            if payload[1] == 161 and payload[2] == 2 and payload[3] == 0x8F:
-                return True, payload[6], (payload[5] == 1), ""
-            # Case B: Unshifted Response
-            elif payload[0] == 161 and payload[1] == 2 and payload[2] == 0x8F:
-                return True, payload[5], (payload[4] == 1), ""
-                
-        elif protocol == "compx":
-            buf = [0] * 17
-            buf[0] = 0
-            buf[1] = 0x04  # Command ID
-            
-            dev.send_feature_report(buf)
-            time.sleep(0.1)
-            resp = dev.get_feature_report(0, 17)
-            if not resp or len(resp) < 10:
-                return False, 0, False, "No response"
-            
-            payload = resp[1:]
-            percentage = payload[5]
-            is_charging = (payload[6] == 1)
-            if 0 <= percentage <= 100:
-                return True, percentage, is_charging, ""
-                
-    except Exception as e:
-        return False, 0, False, str(e)
-    return False, 0, False, "Protocol mismatch"
+        _send_report(dev, buf)
+        time.sleep(0.1)
+        response = dev.get_feature_report(0, len(buf))
+    except OSError as exc:
+        logger.debug("Battery query failed (%s): %s", protocol, exc)
+        return False, 0, False, str(exc)
+
+    if not response:
+        return False, 0, False, "No response"
+    if protocol == "compx":
+        # The reference driver's retrySetGetWithDelayCompx checks 16 payload bytes
+        # and an echoed command. A plausible percentage alone is not a reply.
+        if len(response) != 17 or response[0] != 0 or response[1] != 4:
+            return False, 0, False, "Protocol mismatch"
+        payload = response[1:]
+    else:
+        payload = _matching_payload(response, protocol, command, minimum_length)
+        if payload is None:
+            return False, 0, False, "Protocol mismatch"
+
+    percentage, charging = payload[percentage_index], payload[charging_index]
+    if not 0 <= percentage <= 100:
+        return False, 0, False, "Invalid battery percentage"
+    if charging not in (0, 1):
+        return False, 0, False, "Invalid charging flag"
+    return True, percentage, charging == 1, ""

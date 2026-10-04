@@ -1,116 +1,81 @@
-import hid
-import time
+"""Qt worker: serializes HID access and wakes immediately for refresh or shutdown."""
+
+import logging
+import math
+from threading import Event, Lock, TIMEOUT_MAX
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from gwolves.protocols import VID, MODELS, DYNAMIC_PROTOCOLS, query_battery, query_polling_rate, set_polling_rate
+from gwolves.reader import BatteryMonitor, BatteryStatus, RateRequest, RateResult
+
+logger = logging.getLogger(__name__)
+
 
 class BatteryReaderThread(QThread):
-    # Signals: (percentage, is_charging, is_connected, error_message, model_name, polling_rate, supported_rates)
-    status_updated = pyqtSignal(int, bool, bool, str, str, int, list)
+    status_updated = pyqtSignal(object)
+    polling_rate_result = pyqtSignal(int, bool, str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, poll_interval=5.0, monitor=None):
         super().__init__(parent)
-        self.running = True
-        self.force_check = False
-        self.target_polling_rate = None
+        if not math.isfinite(poll_interval) or not 1 <= poll_interval <= TIMEOUT_MAX:
+            raise ValueError(f"Poll interval must be between 1 and {TIMEOUT_MAX:g} seconds")
+        self.poll_interval = poll_interval
+        self._stopping = Event()
+        self._wake = Event()
+        self._lock = Lock()
+        self._pending = None
+        self._busy = False
+        self._status = BatteryStatus()
+        self.monitor = monitor if monitor is not None else BatteryMonitor(
+            should_stop=self._stopping.is_set
+        )
 
     def run(self):
-        print("Battery reader background thread started.")
-        while self.running:
-            dev = None
+        while not self._stopping.is_set():
+            # Clear before taking the request so requests arriving during I/O wake
+            # the next iteration instead of being lost in the timed wait.
+            self._wake.clear()
+            with self._lock:
+                request = self._pending
+                self._pending = None
             try:
-                devices = hid.enumerate(VID)
-                gw_devices = [d for d in devices if d['vendor_id'] == VID]
-                
-                if not gw_devices:
-                    self.status_updated.emit(0, False, False, "Receiver/Mouse disconnected", "G-Wolves Mouse", 0, [])
-                else:
-                    opened = False
-                    for d in gw_devices:
-                        try:
-                            dev = hid.device()
-                            dev.open_path(d['path'])
-                            pid = d['product_id']
-                            product_string = d.get('product_string') or "G-Wolves Mouse"
-                            
-                            is_wireless = any(x in product_string.lower() for x in ["receiver", "dongle", "wireless"])
-                            
-                            # Lookup or Auto-Detect protocol
-                            if pid in MODELS:
-                                model_name, protocol = MODELS[pid]
-                            elif pid in DYNAMIC_PROTOCOLS:
-                                model_name, protocol = DYNAMIC_PROTOCOLS[pid]
-                            else:
-                                protocol = None
-                                for p_test in ["new", "old", "compx"]:
-                                    success, _, _, _ = query_battery(dev, p_test, is_wireless)
-                                    if success:
-                                        protocol = p_test
-                                        break
-                                if protocol:
-                                    model_name = f"G-Wolves {product_string.replace('G-Wolves ', '')} (Probed)"
-                                    DYNAMIC_PROTOCOLS[pid] = (model_name, protocol)
-                                    print(f"Auto-detected PID {hex(pid)} to use {protocol} protocol.")
-                                else:
-                                    model_name = f"Unknown G-Wolves ({hex(pid)})"
-                                    protocol = "new"  # fallback
-                            
-                            is_high_rate = False
-                            # Determine supported rates based on PID and product string
-                            if "8k" in product_string.lower() or "8k" in model_name.lower() or pid in [0x3817, 0x6817, 0x5617, 0x3617, 0x3854, 0x3619]:
-                                supported_rates = [125, 250, 500, 1000, 2000, 4000, 8000]
-                                is_high_rate = True
-                            elif "4k" in product_string.lower() or "4k" in model_name.lower() or pid in [0x5807, 0x5407, 0x5707, 0x5907]:
-                                supported_rates = [125, 250, 500, 1000, 2000, 4000]
-                                is_high_rate = True
-                            else:
-                                supported_rates = [125, 250, 500, 1000]
-                            
-                            # Write pending target rate if set
-                            if self.target_polling_rate is not None:
-                                if self.target_polling_rate in supported_rates:
-                                    set_polling_rate(dev, protocol, is_wireless, self.target_polling_rate, is_high_rate)
-                                self.target_polling_rate = None
-                            
-                            # Query current battery and polling rate
-                            success, percentage, is_charging, err = query_battery(dev, protocol, is_wireless)
-                            current_rate = query_polling_rate(dev, protocol, is_wireless, is_high_rate) or 1000
-                            
-                            if success:
-                                if is_charging and percentage == 100:
-                                    percentage = 99
-                                self.status_updated.emit(percentage, is_charging, True, "", model_name, current_rate, supported_rates)
-                                opened = True
-                                break
-                            else:
-                                continue
-                        except Exception:
-                            continue
-                        finally:
-                            if dev:
-                                try:
-                                    dev.close()
-                                except:
-                                    pass
-                                dev = None
-                                
-                    if not opened:
-                        self.status_updated.emit(0, False, False, "Permission denied / Device busy", "G-Wolves Mouse", 0, [])
-            except Exception as e:
-                self.status_updated.emit(0, False, False, f"Error: {str(e)}", "G-Wolves Mouse", 0, [])
-            
-            # Sleep 5 seconds or until forced / target rate set
-            sleep_intervals = 5
-            for _ in range(sleep_intervals * 10):
-                if not self.running:
-                    break
-                if self.force_check or self.target_polling_rate is not None:
-                    self.force_check = False
-                    break
-                time.sleep(0.1)
+                status, result = self.monitor.poll(request)
+            except Exception as exc:
+                # Keep the worker alive, but retain a traceback for unexpected bugs.
+                logger.exception("Unexpected error reading mouse status")
+                status = BatteryStatus(error=f"Unexpected device error: {exc}")
+                result = (RateResult(request.rate, False, str(exc)) if request else None)
+            with self._lock:
+                self._status = status
+                if request:
+                    self._busy = False
+            self.status_updated.emit(status)
+            if result is not None:
+                self.polling_rate_result.emit(result.rate, result.success, result.message)
+            if not self._stopping.is_set():
+                self._wake.wait(self.poll_interval)
+
+        with self._lock:
+            pending = self._pending
+            self._pending = None
+            self._busy = False
+        if pending:
+            self.polling_rate_result.emit(pending.rate, False, "Application is stopping")
+
+    def request_polling_rate(self, rate, device_key):
+        with self._lock:
+            if (self._stopping.is_set() or self._busy or not self._status.connected
+                    or device_key != self._status.device_key
+                    or rate not in self._status.supported_rates):
+                return False
+            self._pending = RateRequest(self._status.device_key, rate)
+            self._busy = True
+        self._wake.set()
+        return True
 
     def trigger_check(self):
-        self.force_check = True
+        self._wake.set()
 
     def stop(self):
-        self.running = False
+        self._stopping.set()
+        self._wake.set()

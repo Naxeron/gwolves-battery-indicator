@@ -1,0 +1,2 @@
+include gwolves_indicator.py
+recursive-include docs *.md

@@ -1,0 +1,5 @@
+# G-Wolves devices (VID 33e4): access for the active local desktop session.
+# Keep this before 73-seat-late.rules, which applies the uaccess ACL.
+# hidapi may use either the hidraw backend or the libusb backend.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="33e4", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="33e4", TAG+="uaccess"

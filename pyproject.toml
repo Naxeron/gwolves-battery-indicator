@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gwolves-battery-indicator"
+dynamic = ["version"]
+description = "Linux system tray battery indicator for G-Wolves mice"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["hidapi>=0.14,<1", "PyQt6>=6.5,<7"]
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-cov>=5,<8", "build>=1,<2"]
+
+[project.scripts]
+gwolves-battery = "gwolves.cli:main"
+gwolves-install = "gwolves.install:main"
+
+[project.urls]
+Repository = "https://github.com/Naxeron/gwolves-battery-indicator"
+Issues = "https://github.com/Naxeron/gwolves-battery-indicator/issues"
+
+[tool.setuptools.packages.find]
+include = ["gwolves*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "gwolves.__version__"}
+
+[tool.setuptools.data-files]
+"share/gwolves-battery-indicator" = ["70-gwolves.rules"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]

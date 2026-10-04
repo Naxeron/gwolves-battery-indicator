@@ -1,6 +1,6 @@
-import sys
-from gwolves.ui import GWolvesBatteryApp
+"""Compatibility launcher for source checkouts."""
+
+from gwolves.cli import main
 
 if __name__ == "__main__":
-    app = GWolvesBatteryApp(sys.argv)
-    sys.exit(app.exec())
+    raise SystemExit(main())
